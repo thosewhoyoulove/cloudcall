@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/signaling" },
+    { "path": "packages/webrtc" },
+    { "path": "packages/react" },
+    { "path": "packages/ui" },
+    { "path": "packages/vue" },
+    { "path": "packages/iframe" }
+  ]
+}

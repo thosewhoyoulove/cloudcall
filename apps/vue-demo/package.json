@@ -1,0 +1,14 @@
+{
+  "name": "@cloudcall/vue-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudcall/core": "workspace:*",
+    "@cloudcall/vue": "workspace:*",
+    "vue": "^3.5.22"
+  }
+}

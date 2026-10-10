@@ -1,0 +1,11 @@
+{
+  "name": "@cloudcall/benchmarks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "benchmark": "vitest bench --run"
+  },
+  "dependencies": {
+    "@cloudcall/core": "workspace:*"
+  }
+}

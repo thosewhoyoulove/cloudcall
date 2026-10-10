@@ -1,0 +1,15 @@
+{
+  "name": "@cloudcall/react-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudcall/core": "workspace:*",
+    "@cloudcall/react": "workspace:*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

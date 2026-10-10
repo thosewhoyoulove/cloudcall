@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@cloudcall/core": ["packages/core/src"],
+      "@cloudcall/signaling": ["packages/signaling/src"],
+      "@cloudcall/webrtc": ["packages/webrtc/src"],
+      "@cloudcall/react": ["packages/react/src"],
+      "@cloudcall/ui": ["packages/ui/src"],
+      "@cloudcall/vue": ["packages/vue/src"],
+      "@cloudcall/iframe": ["packages/iframe/src"]
+    }
+  }
+}

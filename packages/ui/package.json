@@ -1,0 +1,23 @@
+{
+  "name": "@cloudcall/ui",
+  "version": "0.1.0",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.tsx --format esm --dts --sourcemap --clean --external react",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudcall/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18.3 <20"
+  }
+}

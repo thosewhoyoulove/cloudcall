@@ -11,13 +11,15 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
+    "test:server": "node --test server/app.test.mjs",
     "test:watch": "vitest",
-    "test:e2e": "pnpm --filter @cloudcall/playground build && playwright test",
+    "test:e2e": "pnpm --filter @cloudcall/playground build --mode demo && playwright test",
+    "test:production": "pnpm --filter @cloudcall/playground build --mode production --outDir dist-production && playwright test --config playwright.production.config.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "benchmark": "vitest bench --run",
     "changeset": "changeset",
-    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:server && pnpm build"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.7",

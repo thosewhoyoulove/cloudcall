@@ -2,6 +2,18 @@ import type { Workbench } from '../use-workbench';
 import { sdkStateLabel } from '../format';
 
 export function NetworkView({ bench }: { bench: Workbench }) {
+  if (bench.realCalls)
+    return (
+      <div className="page">
+        <header className="page-intro">
+          <h2>网络</h2>
+          <p>真实 SIP / WebRTC 通话连接</p>
+        </header>
+        <p role="status">分机：{bench.registered ? '已注册' : '未注册，请重新连接'}</p>
+        <p>当前音频会话：{bench.media.activeStreams}</p>
+        <p>跨网络通话需要可用的 TURN 服务。连接失败原因会显示在页面提示中。</p>
+      </div>
+    );
   const offline = bench.faults.offline;
   const connected = bench.state === 'ready' && !offline;
   return (

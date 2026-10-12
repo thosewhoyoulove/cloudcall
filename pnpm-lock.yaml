@@ -356,6 +356,9 @@ importers:
       '@cloudcall/core':
         specifier: workspace:*
         version: link:../core
+      sip.js:
+        specifier: 0.21.2
+        version: 0.21.2
 
   packages/ui:
     dependencies:
@@ -3460,6 +3463,13 @@ packages:
       }
     engines: { node: '>=14' }
 
+  sip.js@0.21.2:
+    resolution:
+      {
+        integrity: sha512-tSqTcIgrOd2IhP/rd70JablvAp+fSfLSxO4hGNY6LkWRY1SKygTO7OtJEV/BQb8oIxtMRx0LE7nUF2MaqGbFzA==,
+      }
+    engines: { node: '>=10.0' }
+
   slash@3.0.0:
     resolution:
       {
@@ -5749,6 +5759,8 @@ snapshots:
   siginfo@2.0.0: {}
 
   signal-exit@4.1.0: {}
+
+  sip.js@0.21.2: {}
 
   slash@3.0.0: {}
 

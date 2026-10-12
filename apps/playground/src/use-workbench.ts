@@ -5,8 +5,8 @@ import {
   type CallSnapshot,
   type SdkState,
 } from '@cloudcall/core';
-import { MockTransport, type FaultProfile } from '@cloudcall/signaling';
-import { MockMediaAdapter } from '@cloudcall/webrtc';
+import type { FaultProfile } from '@cloudcall/signaling';
+import { createRuntime, realCalls } from './runtime';
 import { messageOf } from './format';
 
 export type LogKind = 'lifecycle' | 'call' | 'state' | 'error' | 'fault' | 'signaling';
@@ -38,8 +38,8 @@ export function useWorkbench() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const transport = useMemo(() => new MockTransport(), []);
-  const media = useMemo(() => new MockMediaAdapter(), []);
+  const runtime = useMemo(createRuntime, []);
+  const { transport, media } = runtime;
   const sdk = useMemo(
     () =>
       createCloudCall({
@@ -47,11 +47,14 @@ export function useWorkbench() {
         media,
         host: {
           async getAccessToken() {
-            return 'mock-token';
+            return realCalls ? 'authenticated-session' : 'mock-token';
           },
           track() {},
         },
-        config: { callTimeoutMs: 15_000, maxConcurrentCalls: 3 },
+        config: {
+          callTimeoutMs: realCalls ? 45_000 : 15_000,
+          maxConcurrentCalls: realCalls ? 1 : 3,
+        },
       }),
     [media, transport],
   );
@@ -89,6 +92,7 @@ export function useWorkbench() {
           setHandles(new Map());
         }
       }),
+      sdk.on('error', report),
       sdk.on('call:created', (call) => {
         const handle = sdk.getCall(call.id);
         if (handle) setHandles((current) => new Map(current).set(call.id, handle));
@@ -185,40 +189,43 @@ export function useWorkbench() {
 
   const patchFaults = useCallback(
     (patch: Partial<FaultProfile>) => {
-      transport.configureFaults(patch);
-      setFaults({ ...transport.faults });
+      if (!runtime.mockTransport) return;
+      runtime.mockTransport.configureFaults(patch);
+      setFaults({ ...runtime.mockTransport.faults });
       const detail = Object.entries(patch)
         .map(([key, value]) => `${key}=${String(value)}`)
         .join(' ');
       log('fault', detail);
     },
-    [log, transport],
+    [log, runtime],
   );
 
   const setMicDenied = useCallback(
     (value: boolean) => {
-      media.setPermissionDenied(value);
+      if (!runtime.mockMedia) return;
+      runtime.mockMedia.setPermissionDenied(value);
       setPermissionDenied(value);
       log('fault', `microphone=${value ? 'denied' : 'allowed'}`);
     },
-    [log, media],
+    [log, runtime],
   );
 
   const simulateIncoming = useCallback(() => {
-    transport.simulateIncoming('4008008888');
-  }, [transport]);
+    runtime.mockTransport?.simulateIncoming('4008008888');
+  }, [runtime]);
 
   const remoteHangup = useCallback(() => {
     const live = activeRef.current;
     if (!live) return;
-    transport.simulateRemoteHangup(live.snapshot.id);
-  }, [transport]);
+    runtime.mockTransport?.simulateRemoteHangup(live.snapshot.id);
+  }, [runtime]);
 
   const failNext = useCallback(() => {
-    transport.configureFaults({ failNext: true });
-    setFaults({ ...transport.faults });
+    if (!runtime.mockTransport) return;
+    runtime.mockTransport.configureFaults({ failNext: true });
+    setFaults({ ...runtime.mockTransport.faults });
     log('fault', 'failNext');
-  }, [log, transport]);
+  }, [log, runtime]);
 
   const retryInit = useCallback(() => {
     setError(null);
@@ -226,13 +233,17 @@ export function useWorkbench() {
   }, [report, sdk]);
 
   const destroySdk = useCallback(() => {
-    void sdk.destroy();
-  }, [sdk]);
+    return sdk.destroy().catch(report);
+  }, [sdk, report]);
 
   const clearLogs = useCallback(() => setLogs([]), []);
   const dismissError = useCallback(() => setError(null), []);
 
   return {
+    reportError: report,
+    realCalls,
+    registered: runtime.sip?.isRegistered() ?? state === 'ready',
+    resumeAudio: () => runtime.sip?.resumeAudio().catch(report),
     number,
     setNumber,
     state,

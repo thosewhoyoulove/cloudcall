@@ -2,7 +2,15 @@ import type { NavId } from '../nav';
 import { NAV } from '../nav';
 import { Icon } from '../icons';
 
-export function Sidebar({ view, onView }: { view: NavId; onView: (view: NavId) => void }) {
+export function Sidebar({
+  view,
+  onView,
+  realCalls = false,
+}: {
+  view: NavId;
+  onView: (view: NavId) => void;
+  realCalls?: boolean;
+}) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -28,7 +36,7 @@ export function Sidebar({ view, onView }: { view: NavId; onView: (view: NavId) =
           </button>
         ))}
       </nav>
-      <p className="side-foot">Mock 信令 · Mock 媒体</p>
+      <p className="side-foot">{realCalls ? 'SIP 信令 · WebRTC 音频' : 'Mock 信令 · Mock 媒体'}</p>
     </aside>
   );
 }

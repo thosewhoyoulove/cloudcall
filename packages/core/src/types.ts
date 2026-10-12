@@ -68,6 +68,8 @@ export type TransportEvent =
   | { type: 'call-event'; callId: string; event: CallEvent; messageId: string };
 
 export interface SignalingTransport {
+  /** Real adapters confirm non-terminal commands before the SDK updates state. */
+  readonly confirmsCommands?: boolean;
   connect(signal: AbortSignal): Promise<void>;
   disconnect(): Promise<void>;
   send(command: Command, signal: AbortSignal): Promise<void>;

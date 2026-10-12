@@ -1,8 +1,10 @@
 node_modules
 dist
+dist-production
 coverage
 playwright-report
 test-results
 .env
 *.local
 *.tsbuildinfo
+deploy/secrets/

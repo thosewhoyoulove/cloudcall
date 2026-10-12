@@ -1,0 +1,17 @@
+{$APP_DOMAIN} {
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options nosniff
+    Referrer-Policy same-origin
+    Permissions-Policy "microphone=(self), camera=()"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' {$SIP_SERVER}; media-src 'self' blob:; img-src 'self' data:; frame-ancestors 'none'"
+  }
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}

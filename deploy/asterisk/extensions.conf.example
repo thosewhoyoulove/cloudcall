@@ -1,0 +1,22 @@
+; Default: internal calls only. No arbitrary external dialing.
+[browser-internal]
+exten => 1001,1,Dial(PJSIP/1001,45)
+ same => n,Hangup()
+exten => 1002,1,Dial(PJSIP/1002,45)
+ same => n,Hangup()
+
+; Enable only for explicitly authorized endpoints by changing their context.
+; Configure a provider trunk named carrier before enabling this context.
+; This example accepts only 9 + an 11-digit mainland China mobile number.
+; Replace route/number normalization/caller ID for your actual provider.
+[browser-outbound]
+include => browser-internal
+; exten => _91[3-9]XXXXXXXXX,1,Set(CALLERID(num)=YOUR_APPROVED_CALLER_ID)
+;  same => n,Dial(PJSIP/${EXTEN:1}@carrier,45)
+;  same => n,Hangup()
+
+; Match inbound trunk packets by provider addresses, never arbitrary Internet
+; packets, then route its endpoint context here.
+[carrier-inbound]
+; exten => YOUR_DID,1,Dial(PJSIP/1001,45)
+;  same => n,Hangup()

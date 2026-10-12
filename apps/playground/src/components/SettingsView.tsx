@@ -15,7 +15,11 @@ export function SettingsView({
     <div className="page">
       <header className="page-intro">
         <h2>设置</h2>
-        <p>外观和实例操作。媒体设备枚举不属于 Mock Adapter，这里不会列出虚构的麦克风。</p>
+        <p>
+          {bench.realCalls
+            ? '真实通话模式。分机配置由登录后的服务端提供。'
+            : '外观和实例操作。媒体设备枚举不属于 Mock Adapter，这里不会列出虚构的麦克风。'}
+        </p>
       </header>
       <div className="settings-list">
         <div className="field">
@@ -37,7 +41,7 @@ export function SettingsView({
             实例
             <small>
               {bench.state === 'destroyed'
-                ? '当前实例已销毁，不能再次 init。创建新实例会挂上新的 Mock Transport。'
+                ? '当前实例已销毁，创建新实例后重新连接。'
                 : bench.state === 'failed'
                   ? '初始化失败后可以重试。若仍处于离线，重试会再次失败。'
                   : `当前状态 ${bench.state}。销毁是终态。`}

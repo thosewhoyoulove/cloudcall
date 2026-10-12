@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/dist
+**/dist-production
+.git
+.env
+**/.env
+**/*.local
+deploy/secrets
+coverage
+playwright-report
+test-results

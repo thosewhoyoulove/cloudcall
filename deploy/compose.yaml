@@ -1,0 +1,34 @@
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: web
+    restart: unless-stopped
+    ports: ['80:80', '443:443', '443:443/udp']
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      SIP_SERVER: ${SIP_SERVER:?Set SIP_SERVER}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: unless-stopped
+    environment:
+      PUBLIC_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN}
+      SIP_SERVER: ${SIP_SERVER:?Set SIP_SERVER}
+      TURN_SECRET: ${TURN_SECRET:?Set TURN_SECRET}
+      TURN_URLS: ${TURN_URLS:?Set TURN_URLS}
+    volumes:
+      - ./secrets/users.json:/run/secrets/users.json:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+volumes:
+  caddy_data:
+  caddy_config:

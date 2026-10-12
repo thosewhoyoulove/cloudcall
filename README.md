@@ -1,6 +1,6 @@
 # CloudCall SDK
 
-面向 CRM、销售管理与呼叫中心场景的企业级云呼叫前端 SDK 参考实现。核心是框架无关的 Headless SDK；Playground 使用真实 Core 配合明确标记的 Mock 信令/媒体适配器运行。
+面向 CRM、销售管理与呼叫中心场景的云呼叫 SDK。核心是框架无关的 Headless SDK；开发 Playground 默认使用 Mock，生产构建默认使用真实 SIP/WebRTC 模式，并包含登录 API 与部署配置。真实服务器与外线仍需开通和验收。
 
 ## 快速开始
 
@@ -14,6 +14,7 @@ pnpm dev
 ```bash
 pnpm run ci
 pnpm test:e2e # 首次需 pnpm exec playwright install chromium
+pnpm test:production # 生产登录与配置失败路径浏览器测试，不替代实网验收
 pnpm benchmark
 ```
 
@@ -47,7 +48,8 @@ await sdk.destroy();
 - **已实现并可本地验证**：Mock 模式拨入/拨出、接听/拒接/挂断、静音、保持、DTMF、转接命令、并发会话、超时、乱序/重复消息、生命周期清理、React/Vue 绑定和 iframe RPC。
 - **浏览器真实媒体**：`getUserMedia`、设备枚举、输出设备切换、轨道释放。需要 HTTPS/localhost 与用户授权。
 - **真实信令底座**：`ConnectionManager` 提供心跳、退避抖动、请求关联、取消与安全重放边界。
-- **未声称已验证**：真实 SIP/PBX 呼叫。项目没有内置账号或凭证，也没有把 UI 状态冒充 SIP。接入需要 WSS SIP 服务、后端签发的短期凭证、STUN/TURN、号码路由与合规配置。具体 SIP.js Adapter 是后续集成点。
+- **真实 SIP 适配器已实现，实网待验收**：`SipTransport` 使用 SIP.js 管理注册、拨入/拨出、音频、静音、保持和 RTP DTMF。生产构建默认使用真实模式，需通过后端登录取得受限分机配置。单通话，转接暂未开放；连接中断后需手动重新连接。
+- **部署资源仍需配置**：WSS PBX、TLS、TURN、分机及手机外线；没有账号或线路就无法实际拨通。分机凭证使用 PBX digest 密码，TURN 使用短期凭证，不声称已完成实网通话验证。见 [生产部署与验收](docs/production.md)。
 
 ## 目录
 

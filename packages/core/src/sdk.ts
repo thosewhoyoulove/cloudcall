@@ -77,14 +77,18 @@ export class CloudCallSDK {
       startedAt: Date.now(),
       revision: 0,
     });
-    await this.options.transport.send(
-      { id: crypto.randomUUID(), callId: id, type: 'dial', payload: request },
-      this.scope.controller.signal,
-    );
-    this.scope.timeout(() => {
-      if (!['active', 'ended', 'failed'].includes(call.getSnapshot().state))
-        call.apply({ type: 'TIMEOUT' });
-    }, this.options.config?.callTimeoutMs ?? 30_000);
+    try {
+      await this.options.transport.send(
+        { id: crypto.randomUUID(), callId: id, type: 'dial', payload: request },
+        this.scope.controller.signal,
+      );
+    } catch (error) {
+      call.apply({
+        type: 'FAIL',
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+      throw error;
+    }
     return call;
   }
   async destroy(): Promise<void> {
@@ -126,7 +130,16 @@ export class CloudCallSDK {
     if (this.seenMessages.has(event.messageId)) return;
     this.seenMessages.add(event.messageId);
     const call = this.calls.get(event.callId);
-    if (call) void call.applyRemote(event.event);
+    if (call) {
+      if (event.event.type === 'FAIL')
+        this.bus.emit(
+          'error',
+          new CloudCallError('TRANSPORT', event.event.error.message, event.event.error),
+        );
+      void call.applyRemote(event.event).catch((error: unknown) => {
+        this.bus.emit('error', new CloudCallError('TRANSPORT', 'Invalid remote call event', error));
+      });
+    }
   }
   private createCall(snapshot: CallSnapshot): CallSession {
     const call = new CallSession(
@@ -140,6 +153,10 @@ export class CloudCallSDK {
       },
     );
     this.calls.set(snapshot.id, call);
+    this.scope.timeout(() => {
+      if (['connecting', 'ringing', 'incoming'].includes(call.getSnapshot().state))
+        call.apply({ type: 'TIMEOUT' });
+    }, this.options.config?.callTimeoutMs ?? 30_000);
     this.bus.emit('call:created', snapshot);
     return call;
   }

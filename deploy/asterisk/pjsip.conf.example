@@ -1,0 +1,52 @@
+; Merge into a supported Asterisk installation. Replace every placeholder first.
+; HTTPS/WSS certificates are configured in http.conf; DTLS certificates below
+; must be readable by the asterisk service user.
+[transport-wss]
+type=transport
+protocol=wss
+bind=0.0.0.0
+
+[browser-endpoint](!)
+type=endpoint
+transport=transport-wss
+context=browser-internal
+disallow=all
+allow=opus,ulaw,alaw
+webrtc=yes
+dtls_auto_generate_cert=yes
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+ice_support=yes
+; If behind NAT, set external_media_address and local_net on the transport
+; using your actual public address and private subnets.
+
+[1001](browser-endpoint)
+auth=auth1001
+aors=1001
+[auth1001]
+type=auth
+auth_type=userpass
+username=1001
+password=REPLACE_WITH_RANDOM_PBX_1001_PASSWORD
+[1001]
+type=aor
+max_contacts=1
+remove_existing=yes
+
+[1002](browser-endpoint)
+auth=auth1002
+aors=1002
+[auth1002]
+type=auth
+auth_type=userpass
+username=1002
+password=REPLACE_WITH_RANDOM_PBX_1002_PASSWORD
+[1002]
+type=aor
+max_contacts=1
+remove_existing=yes
+
+; Provider-specific SIP trunk must be added using the provider's endpoint,
+; auth, aor, transport, registration and caller ID requirements.

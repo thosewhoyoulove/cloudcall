@@ -1,0 +1,16 @@
+listening-port=3478
+tls-listening-port=5349
+fingerprint
+use-auth-secret
+static-auth-secret=REPLACE_WITH_THE_SAME_TURN_SECRET_AS_API
+realm=turn.example.com
+server-name=turn.example.com
+cert=/etc/letsencrypt/live/turn.example.com/fullchain.pem
+pkey=/etc/letsencrypt/live/turn.example.com/privkey.pem
+min-port=49160
+max-port=49260
+no-cli
+no-multicast-peers
+no-loopback-peers
+; Set listening-ip/relay-ip and external-ip=PUBLIC/PRIVATE if behind NAT.
+; Restrict peer destinations with firewall rules to the PBX media addresses.

@@ -1,0 +1,6 @@
+[general]
+rtpstart=10000
+rtpend=20000
+icesupport=yes
+; Optional STUN server when PBX needs server-reflexive candidates:
+; stunaddr=your-stun-host:3478

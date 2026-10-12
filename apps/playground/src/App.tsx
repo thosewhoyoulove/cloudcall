@@ -13,12 +13,15 @@ import { LogsView } from './components/LogsView';
 import { NetworkView } from './components/NetworkView';
 import { SettingsView } from './components/SettingsView';
 import { MachineView } from './components/MachineView';
+import { Login } from './components/Login';
+import { realCalls } from './runtime';
 
 type Theme = 'dark' | 'light';
 
 export function App() {
   const [epoch, setEpoch] = useState(0);
-  return <Shell key={epoch} onRecreate={() => setEpoch((value) => value + 1)} />;
+  const shell = <Shell key={epoch} onRecreate={() => setEpoch((value) => value + 1)} />;
+  return realCalls ? <Login>{shell}</Login> : shell;
 }
 
 function Shell({ onRecreate }: { onRecreate: () => void }) {
@@ -55,7 +58,7 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
       if (isTypingTarget(event.target) || view !== 'softphone') return;
       if (/^[0-9*#]$/.test(event.key)) {
         event.preventDefault();
-        void bench.pressDigit(event.key);
+        void bench.pressDigit(event.key).catch(() => {});
         return;
       }
       if (event.key === 'Backspace') {
@@ -84,7 +87,7 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
 
   return (
     <div className="shell" data-inspector={inspectorOpen ? 'open' : 'closed'}>
-      <Sidebar view={view} onView={setView} />
+      <Sidebar view={view} onView={setView} realCalls={bench.realCalls} />
       <div className="workspace">
         <header className="topbar">
           <div className="top-title">
@@ -117,6 +120,34 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
           </div>
         </header>
         <div className="canvas">
+          {bench.realCalls && (
+            <div className="banner" role="status">
+              {bench.registered ? '真实通话模式 · 分机已注册' : '真实通话模式 · 分机未注册'}
+              <button type="button" onClick={() => void bench.resumeAudio()}>
+                播放通话声音
+              </button>
+              {!bench.registered && bench.state === 'ready' && (
+                <button type="button" onClick={onRecreate}>
+                  重新连接
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void bench
+                    .destroySdk()
+                    .then(() => fetch('/api/logout', { method: 'POST' }))
+                    .then((response) => {
+                      if (!response.ok) throw new Error('退出登录失败');
+                      window.location.reload();
+                    })
+                    .catch(bench.reportError);
+                }}
+              >
+                退出登录
+              </button>
+            </div>
+          )}
           {bench.faults.offline ? (
             <div className="banner" role="status">
               信令已标记为离线。后续 connect 和 send 会被 Mock Transport 拒绝。

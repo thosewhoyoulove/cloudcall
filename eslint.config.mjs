@@ -4,9 +4,10 @@ import tseslint from 'typescript-eslint';
 import hooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/coverage/**', '**/playwright-report/**'] },
+  { ignores: ['**/dist/**', '**/dist-production/**', '**/coverage/**', '**/playwright-report/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  { files: ['server/**/*.mjs'], languageOptions: { globals: globals.node } },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser, ...globals.node } },

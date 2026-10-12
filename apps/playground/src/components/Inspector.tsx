@@ -83,10 +83,12 @@ export function Inspector({
           ))}
         {tab === 'signaling' && (
           <div className="inspector-stack">
-            <p className="muted">
-              延迟 {bench.faults.latencyMs} ms · 重复 {bench.faults.duplicate ? '开' : '关'} · 乱序{' '}
-              {bench.faults.outOfOrder ? '开' : '关'}
-            </p>
+            {!bench.realCalls && (
+              <p className="muted">
+                延迟 {bench.faults.latencyMs} ms · 重复 {bench.faults.duplicate ? '开' : '关'} ·
+                乱序 {bench.faults.outOfOrder ? '开' : '关'}
+              </p>
+            )}
             <LogSlice bench={bench} kind="signaling" empty="还没有信令事件" />
           </div>
         )}
@@ -101,7 +103,15 @@ export function Inspector({
             <div>
               <dt>传输</dt>
               <dd>
-                {bench.faults.offline ? '离线' : bench.state === 'ready' ? '已连接' : '未就绪'}
+                {bench.realCalls
+                  ? bench.registered
+                    ? '已注册'
+                    : '未注册'
+                  : bench.faults.offline
+                    ? '离线'
+                    : bench.state === 'ready'
+                      ? '已连接'
+                      : '未就绪'}
               </dd>
             </div>
             <div>
@@ -114,7 +124,13 @@ export function Inspector({
             </div>
             <div>
               <dt>麦克风</dt>
-              <dd>{bench.permissionDenied ? '模拟拒绝' : '模拟允许'}</dd>
+              <dd>
+                {bench.realCalls
+                  ? '由浏览器授权'
+                  : bench.permissionDenied
+                    ? '模拟拒绝'
+                    : '模拟允许'}
+              </dd>
             </div>
           </dl>
         )}
@@ -124,18 +140,23 @@ export function Inspector({
             <button
               type="button"
               className="btn-quiet"
-              disabled={bench.state !== 'ready'}
+              disabled={bench.realCalls || bench.state !== 'ready'}
               onClick={bench.simulateIncoming}
             >
               模拟呼入
             </button>
-            <button type="button" className="btn-quiet" onClick={bench.failNext}>
+            <button
+              type="button"
+              className="btn-quiet"
+              disabled={bench.realCalls}
+              onClick={bench.failNext}
+            >
               下一指令失败
             </button>
             <button
               type="button"
               className="btn-quiet"
-              disabled={!bench.active}
+              disabled={bench.realCalls || !bench.active}
               onClick={bench.remoteHangup}
             >
               模拟远端挂断
@@ -154,7 +175,11 @@ export function Inspector({
                 销毁 SDK
               </button>
             )}
-            <p className="muted">模拟呼入使用 Mock Transport。销毁后该实例不能复用。</p>
+            <p className="muted">
+              {bench.realCalls
+                ? '真实模式不提供模拟故障。销毁后需创建新实例。'
+                : '模拟呼入使用 Mock Transport。销毁后该实例不能复用。'}
+            </p>
           </div>
         )}
       </div>

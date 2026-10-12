@@ -1,0 +1,16 @@
+[
+  {
+    "username": "agent1001",
+    "passwordHash": "REPLACE_WITH_SERVER_HASH_PASSWORD_OUTPUT",
+    "aor": "sip:1001@pbx.example.com",
+    "authorizationUsername": "1001",
+    "authorizationPassword": "REPLACE_WITH_PBX_1001_PASSWORD"
+  },
+  {
+    "username": "agent1002",
+    "passwordHash": "REPLACE_WITH_SERVER_HASH_PASSWORD_OUTPUT",
+    "aor": "sip:1002@pbx.example.com",
+    "authorizationUsername": "1002",
+    "authorizationPassword": "REPLACE_WITH_PBX_1002_PASSWORD"
+  }
+]

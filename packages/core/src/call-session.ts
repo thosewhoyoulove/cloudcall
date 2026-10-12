@@ -35,7 +35,7 @@ export class CallSession implements CallHandle {
     this.snapshot = next;
     this.bus.emit('updated', this.getSnapshot());
     this.onUpdate(this.getSnapshot());
-    if (isTerminal(next.state)) void this.media.release(this.id);
+    if (isTerminal(next.state)) void this.media.release(this.id).catch(() => {});
   }
   async applyRemote(event: CallEvent): Promise<void> {
     if (event.type === 'REMOTE_ACCEPTED' && !isTerminal(this.snapshot.state)) {
@@ -92,13 +92,21 @@ export class CallSession implements CallHandle {
   private command(type: Command['type'], event: CallEvent, acquire = false): Promise<void> {
     return this.enqueue(async () => {
       if (isTerminal(this.snapshot.state)) return;
-      if (acquire) await this.media.acquire(this.id, this.signal);
       // Local intent wins synchronously; a late REMOTE_ACCEPTED is ignored by the terminal state.
-      this.apply(event);
+      transition(this.snapshot, event); // Validate before sending an irreversible command.
       try {
+        if (acquire) await this.media.acquire(this.id, this.signal);
+        if (!this.transport.confirmsCommands) this.apply(event);
         await this.send(type);
+        if (this.transport.confirmsCommands && !isTerminal(this.snapshot.state)) {
+          // Incoming SIP acceptance is confirmed by the Established event.
+          if (type !== 'accept') this.apply(event);
+        }
       } catch (error) {
-        if (!isTerminal(this.snapshot.state))
+        if (
+          !isTerminal(this.snapshot.state) &&
+          !(this.transport.confirmsCommands && (type === 'hold' || type === 'resume'))
+        )
           this.apply({
             type: 'FAIL',
             error: error instanceof Error ? error : new Error(String(error)),

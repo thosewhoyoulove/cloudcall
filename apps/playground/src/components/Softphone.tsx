@@ -144,9 +144,12 @@ export function Softphone({ bench }: { bench: Workbench }) {
               disabled={padMode === 'locked' || (padMode === 'dial' && state !== 'ready')}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                void bench.pressDigit(key.digit).then(() => {
-                  if (padMode === 'dtmf') setDtmf(key.digit);
-                });
+                void bench
+                  .pressDigit(key.digit)
+                  .then(() => {
+                    if (padMode === 'dtmf') setDtmf(key.digit);
+                  })
+                  .catch(() => {});
               }}
             >
               <b>{key.digit}</b>
@@ -156,24 +159,27 @@ export function Softphone({ bench }: { bench: Workbench }) {
         </div>
 
         {active && handle ? (
-          <CallControls call={handle} snapshot={active} />
+          <CallControls call={handle} snapshot={active} onError={bench.reportError} />
         ) : (
           <button
             type="button"
             className="btn-dial"
-            disabled={state !== 'ready'}
+            disabled={state !== 'ready' || !bench.registered}
             onClick={() => void bench.dial()}
           >
             拨打电话
           </button>
         )}
 
-        {active && (active.state === 'active' || active.state === 'holding') ? (
+        {!bench.realCalls && active && (active.state === 'active' || active.state === 'holding') ? (
           <form
             className="transfer"
             onSubmit={(event) => {
               event.preventDefault();
-              void bench.transfer(transferTo).then(() => setTransferTo(''));
+              void bench
+                .transfer(transferTo)
+                .then(() => setTransferTo(''))
+                .catch(() => {});
             }}
           >
             <input

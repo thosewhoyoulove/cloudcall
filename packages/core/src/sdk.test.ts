@@ -21,6 +21,71 @@ function fixtures() {
   return { transport, media, listeners };
 }
 describe('CloudCallSDK lifecycle', () => {
+  it('ends the call and releases media when sending dial fails', async () => {
+    const f = fixtures();
+    vi.mocked(f.transport.send).mockRejectedValueOnce(new Error('Offline'));
+    const sdk = createCloudCall({
+      transport: f.transport,
+      media: f.media,
+      host: { getAccessToken: async () => '' },
+    });
+    await sdk.init();
+    await expect(sdk.dial({ phoneNumber: '1001' })).rejects.toThrow('Offline');
+    expect(sdk.getCalls()[0]?.state).toBe('failed');
+    expect(f.media.release).toHaveBeenCalled();
+    await sdk.destroy();
+  });
+  it('does not end a held call when the ringing deadline expires', async () => {
+    vi.useFakeTimers();
+    const f = fixtures();
+    const sdk = createCloudCall({
+      transport: f.transport,
+      media: f.media,
+      host: { getAccessToken: async () => '' },
+      config: { callTimeoutMs: 100 },
+    });
+    try {
+      await sdk.init();
+      const call = await sdk.dial({ phoneNumber: '1001' });
+      f.listeners.forEach((listener) =>
+        listener({
+          type: 'call-event',
+          callId: call.id,
+          messageId: 'accepted',
+          event: { type: 'REMOTE_ACCEPTED' },
+        }),
+      );
+      await Promise.resolve();
+      await call.hold();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(call.getSnapshot().state).toBe('holding');
+    } finally {
+      await sdk.destroy();
+      vi.useRealTimers();
+    }
+  });
+  it('times out unanswered inbound calls and releases the SIP session', async () => {
+    vi.useFakeTimers();
+    const f = fixtures();
+    const sdk = createCloudCall({
+      transport: f.transport,
+      media: f.media,
+      host: { getAccessToken: async () => '' },
+      config: { callTimeoutMs: 100 },
+    });
+    try {
+      await sdk.init();
+      f.listeners.forEach((listener) =>
+        listener({ type: 'incoming', call: { id: 'incoming', phoneNumber: '1001' } }),
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(sdk.getCall('incoming')?.getSnapshot().endReason).toBe('timeout');
+      expect(f.media.release).toHaveBeenCalledWith('incoming');
+    } finally {
+      await sdk.destroy();
+      vi.useRealTimers();
+    }
+  });
   it('deduplicates init and destroy', async () => {
     const f = fixtures();
     const sdk = createCloudCall({

@@ -74,7 +74,8 @@ body {
   color: var(--text);
 }
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
@@ -219,7 +220,20 @@ code {
 .top-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+}
+.agent-select select,
+.field select {
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  padding: 0 8px;
+}
+.agent-select select {
+  border-radius: 999px;
 }
 .presence {
   display: inline-flex;
@@ -303,6 +317,53 @@ code {
 }
 .banner-danger {
   background: var(--danger-soft);
+}
+.banner-quiet {
+  background: var(--bg-subtle);
+}
+.screen-pop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.screen-pop span,
+.screen-pop small {
+  display: block;
+  color: var(--text-tertiary);
+}
+.screen-pop strong {
+  display: block;
+  margin: 2px 0;
+}
+.screen-pop button {
+  border: 0;
+  background: transparent;
+  font-weight: 600;
+}
+.quality {
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.quality-good {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.quality-fair {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.quality-poor {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .text-btn:hover {
   color: var(--accent);
@@ -440,6 +501,7 @@ code {
 .phone-status {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-height: 24px;
   margin-bottom: 10px;

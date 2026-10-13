@@ -52,4 +52,18 @@ describe('confirmed transport commands', () => {
     await expect(call.hold()).rejects.toThrow('Cannot apply');
     expect(send).not.toHaveBeenCalled();
   });
+  it('ends the call after the transport accepts a blind transfer', async () => {
+    const call = fixture(async () => {});
+    await call.applyRemote({ type: 'ACCEPT' });
+    await call.transfer('1002');
+    expect(call.getSnapshot()).toMatchObject({ state: 'ended', endReason: 'transferred' });
+  });
+  it('does not end the call when the transport rejects the transfer', async () => {
+    const call = fixture(async (command) => {
+      if (command.type === 'transfer') throw new Error('Rejected');
+    });
+    await call.applyRemote({ type: 'ACCEPT' });
+    await expect(call.transfer('1002')).rejects.toThrow('Rejected');
+    expect(call.getSnapshot().state).toBe('active');
+  });
 });

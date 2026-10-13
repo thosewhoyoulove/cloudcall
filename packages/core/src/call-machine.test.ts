@@ -26,4 +26,10 @@ describe('call state machine', () => {
     const ended = transition(base, { type: 'HANGUP' });
     expect(transition(ended, { type: 'HANGUP' })).toBe(ended);
   });
+  it('ends an active or held call when a blind transfer is accepted', () => {
+    const active = transition(base, { type: 'REMOTE_ACCEPTED' }, 2);
+    expect(transition(active, { type: 'TRANSFERRED' }, 3).endReason).toBe('transferred');
+    const holding = transition(active, { type: 'HOLD' }, 4);
+    expect(transition(holding, { type: 'TRANSFERRED' }, 5).state).toBe('ended');
+  });
 });

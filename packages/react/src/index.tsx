@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { CallHandle, CallSnapshot, CloudCallSDK } from '@cloudcall/core';
+import type { AgentPresence, CallHandle, CallSnapshot, CloudCallSDK } from '@cloudcall/core';
 
 const Context = createContext<CloudCallSDK | null>(null);
 export function CloudCallProvider({ sdk, children }: { sdk: CloudCallSDK; children: ReactNode }) {
@@ -35,4 +35,10 @@ export function useCall(call: CallHandle): CallSnapshot {
   const [snapshot, setSnapshot] = useState(() => call.getSnapshot());
   useEffect(() => call.subscribe(setSnapshot), [call]);
   return snapshot;
+}
+export function useAgentPresence(): AgentPresence {
+  const sdk = useCloudCall();
+  const [presence, setPresence] = useState(() => sdk.getAgentPresence());
+  useEffect(() => sdk.on('agent:presence', (event) => setPresence(event.presence)), [sdk]);
+  return presence;
 }

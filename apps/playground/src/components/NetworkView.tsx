@@ -11,6 +11,10 @@ export function NetworkView({ bench }: { bench: Workbench }) {
         </header>
         <p role="status">分机：{bench.registered ? '已注册' : '未注册，请重新连接'}</p>
         <p>当前音频会话：{bench.media.activeStreams}</p>
+        <p>
+          通话中的质量条来自 WebRTC inbound RTP 与候选对统计，是估计值，不是线路 MOS 探针。 媒体进入
+          disconnected 时会话会标成重新连接；信令断开仍会结束通话，需要手动重新连接。
+        </p>
         <p>跨网络通话需要可用的 TURN 服务。连接失败原因会显示在页面提示中。</p>
       </div>
     );
@@ -87,6 +91,25 @@ export function NetworkView({ bench }: { bench: Workbench }) {
           checked={bench.permissionDenied}
           onChange={bench.setMicDenied}
         />
+        <label className="field">
+          <span>
+            模拟通话质量
+            <small>只影响已接通会话的质量采样，不伪造 RTP</small>
+          </span>
+          <select
+            aria-label="模拟通话质量"
+            value={bench.linkQuality}
+            onChange={(event) => {
+              const level = event.target.value;
+              if (level === 'good' || level === 'fair' || level === 'poor')
+                bench.setLinkQuality(level);
+            }}
+          >
+            <option value="good">良好</option>
+            <option value="fair">一般</option>
+            <option value="poor">较差</option>
+          </select>
+        </label>
         <div className="field">
           <span>
             下一条指令失败

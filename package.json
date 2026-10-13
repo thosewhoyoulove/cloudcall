@@ -11,7 +11,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
-    "test:server": "node --test server/app.test.mjs",
+    "test:server": "node --test server/*.test.mjs",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @cloudcall/playground build --mode demo && playwright test",
     "test:production": "pnpm --filter @cloudcall/playground build --mode production --outDir dist-production && playwright test --config playwright.production.config.ts",

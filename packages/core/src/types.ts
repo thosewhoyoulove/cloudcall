@@ -19,7 +19,34 @@ export type CallEndReason =
   | 'timeout'
   | 'network-error'
   | 'signaling-error'
+  | 'transferred'
   | 'sdk-destroyed';
+
+export type RecordingState = 'off' | 'pending' | 'recording' | 'stopped';
+export type QualityLevel = 'good' | 'fair' | 'poor' | 'unknown';
+export type AgentPresence = 'available' | 'away' | 'busy' | 'wrap-up' | 'offline';
+export type PresenceReason = 'manual' | 'call' | 'wrap-up' | 'destroy';
+
+export interface CallQuality {
+  timestamp: number;
+  level: QualityLevel;
+  jitterMs?: number;
+  roundTripTimeMs?: number;
+  packetsLost?: number;
+  packetsReceived?: number;
+}
+
+export interface AgentPresenceChange {
+  presence: AgentPresence;
+  reason: PresenceReason;
+}
+
+export interface ScreenPop {
+  callId: string;
+  phoneNumber: string;
+  direction: CallDirection;
+  businessContext?: Readonly<Record<string, unknown>>;
+}
 
 export interface CallSnapshot {
   id: string;
@@ -32,6 +59,9 @@ export interface CallSnapshot {
   endedAt?: number;
   endReason?: CallEndReason;
   revision: number;
+  recording?: RecordingState;
+  recordingId?: string;
+  businessContext?: Readonly<Record<string, unknown>>;
 }
 
 export type CallEvent =
@@ -47,6 +77,7 @@ export type CallEvent =
   | { type: 'NETWORK_RESTORED'; sequence?: number }
   | { type: 'TIMEOUT'; sequence?: number }
   | { type: 'FAIL'; error: Error; sequence?: number }
+  | { type: 'TRANSFERRED'; sequence?: number }
   | { type: 'DESTROY'; sequence?: number };
 
 export interface DialRequest {
@@ -56,6 +87,7 @@ export interface DialRequest {
 export interface IncomingCall {
   id: string;
   phoneNumber: string;
+  businessContext?: Readonly<Record<string, unknown>>;
 }
 export interface Command {
   id: string;
@@ -76,12 +108,26 @@ export interface SignalingTransport {
   subscribe(listener: (event: TransportEvent) => void): () => void;
 }
 
+export interface AudioDevice {
+  deviceId: string;
+  kind: string;
+  label: string;
+}
+
 export interface MediaAdapter {
   acquire(callId: string, signal: AbortSignal): Promise<void>;
   release(callId: string): Promise<void>;
   setMuted(callId: string, muted: boolean): Promise<void>;
+  setInputDevice?(deviceId: string): Promise<void>;
   setOutputDevice?(deviceId: string): Promise<void>;
+  enumerateDevices?(): Promise<readonly AudioDevice[]>;
+  getQuality?(callId: string): Promise<CallQuality | undefined>;
   destroy(): Promise<void>;
+}
+
+export interface RecordingHook {
+  start(call: CallSnapshot): Promise<{ id: string }>;
+  stop(call: CallSnapshot, recordingId: string): Promise<void>;
 }
 
 export interface HostAdapter {
@@ -89,16 +135,23 @@ export interface HostAdapter {
   getUserContext?(): Promise<Readonly<Record<string, unknown>>>;
   track?(name: string, data: Readonly<Record<string, unknown>>): void;
   navigate?(url: string): void;
+  /** CRM screen-pop. Failures are reported on the error bus and do not end the call. */
+  screenPop?(pop: ScreenPop): void | Promise<void>;
 }
 
 export interface CloudCallConfig {
   callTimeoutMs?: number;
   maxConcurrentCalls?: number;
+  /** Client-side after-call work. Zero keeps the agent available as soon as the call ends. */
+  wrapUpMs?: number;
+  /** Set to 0 to disable polling. Samples are skipped when media has no getQuality. */
+  qualityIntervalMs?: number;
 }
 export interface CloudCallOptions {
   transport: SignalingTransport;
   media: MediaAdapter;
   host: HostAdapter;
+  recording?: RecordingHook;
   config?: CloudCallConfig;
 }
 
@@ -107,6 +160,9 @@ export interface SdkEvents {
   'call:created': CallSnapshot;
   'call:updated': CallSnapshot;
   'call:ended': CallSnapshot;
+  'call:quality': { callId: string; quality: CallQuality };
+  'agent:presence': AgentPresenceChange;
+  'crm:screen-pop': ScreenPop;
   error: CloudCallError;
 }
 
@@ -121,6 +177,8 @@ export interface CallHandle {
   mute(muted?: boolean): Promise<void>;
   sendDtmf(tones: string): Promise<void>;
   transfer(target: string): Promise<void>;
+  startRecording(): Promise<void>;
+  stopRecording(): Promise<void>;
   subscribe(listener: (snapshot: CallSnapshot) => void): () => void;
 }
 

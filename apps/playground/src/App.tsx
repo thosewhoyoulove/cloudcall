@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { NavId, InspectorTab } from './nav';
 import { VIEW_TITLE } from './nav';
-import { isTypingTarget, sdkStateLabel } from './format';
+import { isTypingTarget, presenceLabel, sdkStateLabel } from './format';
 import { Icon } from './icons';
 import { useWorkbench } from './use-workbench';
 import { Sidebar } from './components/Sidebar';
@@ -55,6 +55,7 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
         setInspectorOpen(false);
         return;
       }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target) || view !== 'softphone') return;
       if (/^[0-9*#]$/.test(event.key)) {
         event.preventDefault();
@@ -70,20 +71,17 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
         void bench.dial();
         return;
       }
-      if (event.key.toLowerCase() === 'm') void bench.toggleMute();
-      if (event.key.toLowerCase() === 'h') void bench.toggleHold();
+      const key = event.key.toLowerCase();
+      if (key === 'm') void bench.toggleMute();
+      if (key === 'h') void bench.toggleHold();
+      if (key === 'a') void bench.acceptIncoming();
+      if (key === 'r') void bench.rejectIncoming();
+      if (key === 'k') void bench.hangupActive();
+      if (key === 'b') void bench.toggleRecording();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [bench, view]);
-
-  const presence = bench.faults.offline
-    ? 'down'
-    : bench.state === 'ready'
-      ? 'live'
-      : bench.state === 'failed'
-        ? 'down'
-        : 'wait';
 
   return (
     <div className="shell" data-inspector={inspectorOpen ? 'open' : 'closed'}>
@@ -95,10 +93,26 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
             <h1>{VIEW_TITLE[view]}</h1>
           </div>
           <div className="top-actions">
-            <span className={`presence presence-${presence}`}>
+            <label className="agent-select">
+              <span className="sr-only">座席意图</span>
+              <select
+                aria-label="座席意图"
+                value={bench.desiredPresence}
+                disabled={bench.state !== 'ready'}
+                onChange={(event) =>
+                  bench.setDesiredPresence(event.target.value === 'away' ? 'away' : 'available')
+                }
+              >
+                <option value="available">可接听</option>
+                <option value="away">离开</option>
+              </select>
+            </label>
+            <span
+              className={`presence presence-${bench.presence === 'available' ? 'live' : bench.presence === 'offline' ? 'down' : 'wait'}`}
+            >
               <i />
-              {sdkStateLabel[bench.state]}
-              <code>{bench.state}</code>
+              {presenceLabel[bench.presence]}
+              <code>{sdkStateLabel[bench.state]}</code>
             </span>
             <button
               type="button"
@@ -120,9 +134,18 @@ function Shell({ onRecreate }: { onRecreate: () => void }) {
           </div>
         </header>
         <div className="canvas">
+          {!bench.realCalls && (
+            <div className="banner banner-quiet" role="status">
+              Mock 演示模式。拨号、转接、录音钩子和质量采样都在本地完成，不连接 PBX。
+            </div>
+          )}
           {bench.realCalls && (
             <div className="banner" role="status">
-              {bench.registered ? '真实通话模式 · 分机已注册' : '真实通话模式 · 分机未注册'}
+              {bench.registration === 'registered'
+                ? '真实 SIP 模式 · 分机已注册'
+                : bench.registration === 'connecting'
+                  ? '真实 SIP 模式 · 正在注册分机'
+                  : '真实 SIP 模式 · 信令已断开，当前通话不会自动恢复'}
               <button type="button" onClick={() => void bench.resumeAudio()}>
                 播放通话声音
               </button>

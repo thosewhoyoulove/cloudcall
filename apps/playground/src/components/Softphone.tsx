@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { StatusBadge, CallControls } from '@cloudcall/ui';
+import { StatusBadge, CallControls, QualityMeter } from '@cloudcall/ui';
 import type { Workbench } from '../use-workbench';
 import {
   PAD,
@@ -7,6 +7,7 @@ import {
   directionLabel,
   endReasonLabel,
   formatDuration,
+  lookupCaller,
   sdkStateLabel,
 } from '../format';
 import { Icon } from '../icons';
@@ -60,9 +61,11 @@ export function Softphone({ bench }: { bench: Workbench }) {
         ? '按键作为 DTMF 发送 · M 静音 · H 保持'
         : padMode === 'locked'
           ? active?.state === 'incoming'
-            ? '接听或拒接这通来电'
-            : '正在呼叫，可以挂断'
-          : 'Enter 拨打 · Backspace 删除';
+            ? 'A 接听 · R 拒接'
+            : active?.state === 'reconnecting'
+              ? '媒体重连中，可挂断。信令断开不会自动恢复通话'
+              : '正在呼叫，可以挂断'
+          : 'Enter 拨打 · Backspace 删除 · M 静音 · H 保持 · K 挂断 · B 录音';
 
   return (
     <div className="soft-layout">
@@ -71,8 +74,29 @@ export function Softphone({ bench }: { bench: Workbench }) {
           <i className="tone-dot" data-tone={tone} />
           <span>{headline}</span>
           {active ? <StatusBadge state={active.state} /> : null}
+          {active && (active.state === 'active' || active.state === 'holding') ? (
+            <QualityMeter quality={bench.quality} />
+          ) : null}
           {duration ? <time>{duration}</time> : null}
         </div>
+
+        {bench.screenPop ? (
+          <div className="screen-pop" role="status">
+            <div>
+              <span>CRM 弹屏 · {bench.screenPop.direction === 'inbound' ? '呼入' : '呼出'}</span>
+              <strong>{lookupCaller(bench.screenPop.phoneNumber)?.name ?? '未匹配客户'}</strong>
+              <small>
+                {bench.screenPop.phoneNumber}
+                {lookupCaller(bench.screenPop.phoneNumber)
+                  ? ` · ${lookupCaller(bench.screenPop.phoneNumber)?.account}`
+                  : ' · 宿主可在 screenPop 钩子里打开 CRM'}
+              </small>
+            </div>
+            <button type="button" onClick={bench.dismissScreenPop}>
+              关闭
+            </button>
+          </div>
+        ) : null}
 
         {!active && terminal && latest ? (
           <div className="outcome">
@@ -171,7 +195,7 @@ export function Softphone({ bench }: { bench: Workbench }) {
           </button>
         )}
 
-        {!bench.realCalls && active && (active.state === 'active' || active.state === 'holding') ? (
+        {active && (active.state === 'active' || active.state === 'holding') ? (
           <form
             className="transfer"
             onSubmit={(event) => {
@@ -185,7 +209,7 @@ export function Softphone({ bench }: { bench: Workbench }) {
             <input
               aria-label="转接号码"
               inputMode="tel"
-              placeholder="转接号码"
+              placeholder="盲转号码"
               value={transferTo}
               onChange={(event) =>
                 setTransferTo(event.target.value.replace(/[^\d*#+]/g, '').slice(0, 20))
@@ -196,6 +220,13 @@ export function Softphone({ bench }: { bench: Workbench }) {
         ) : null}
 
         <p className="hint">{hint}</p>
+        {active && (active.state === 'active' || active.state === 'holding') ? (
+          <p className="hint">
+            {bench.realCalls
+              ? '盲转在 PBX 接受 SIP REFER 后结束本通，不表示目标已经接听。录音按钮调用宿主钩子，不在浏览器里存音频。'
+              : '演示转接会在命令成功后结束本通。录音钩子只记录开始和停止，不采集音频。'}
+          </p>
+        ) : null}
       </section>
 
       <aside className="recent">

@@ -8,13 +8,16 @@ import {
   Web,
 } from 'sip.js';
 import type { Session } from 'sip.js';
-import type {
-  CallEvent,
-  Command,
-  DialRequest,
-  MediaAdapter,
-  SignalingTransport,
-  TransportEvent,
+import {
+  qualityFromAudioStats,
+  type AudioDevice,
+  type CallEvent,
+  type CallQuality,
+  type Command,
+  type DialRequest,
+  type MediaAdapter,
+  type SignalingTransport,
+  type TransportEvent,
 } from '@cloudcall/core';
 
 export interface SipConfiguration {
@@ -25,6 +28,8 @@ export interface SipConfiguration {
   iceServers: RTCIceServer[];
 }
 
+export type SipRegistrationState = 'connecting' | 'registered' | 'disconnected';
+
 /** SIP.js owns both signaling and media; use this instance for both SDK adapters. */
 export class SipTransport implements SignalingTransport, MediaAdapter {
   readonly confirmsCommands = true;
@@ -34,9 +39,14 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
   private readonly sessions = new Map<string, Session>();
   private readonly audio = new Map<string, HTMLAudioElement>();
   private readonly localEnding = new Set<string>();
+  private readonly transferring = new Set<string>();
+  private readonly degraded = new Set<string>();
   private readonly ringing = new Set<string>();
   private readonly listeners = new Set<(event: TransportEvent) => void>();
+  private readonly registrationListeners = new Set<(state: SipRegistrationState) => void>();
+  private registration: SipRegistrationState = 'disconnected';
   private outputDevice: string | undefined;
+  private inputDevice: string | undefined;
   private domain = '';
   private configuration: SipConfiguration | undefined;
 
@@ -46,12 +56,22 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
 
   async connect(signal: AbortSignal): Promise<void> {
     await this.disconnect();
-    const config = await this.loadConfiguration(signal);
-    signal.throwIfAborted();
-    if (!window.isSecureContext) throw new Error('真实通话需要 HTTPS 或 localhost');
-    if (new URL(config.server).protocol !== 'wss:') throw new Error('SIP 服务必须使用 WSS');
+    this.setRegistration('connecting');
+    let config: SipConfiguration;
+    try {
+      config = await this.loadConfiguration(signal);
+      signal.throwIfAborted();
+      if (!window.isSecureContext) throw new Error('真实通话需要 HTTPS 或 localhost');
+      if (new URL(config.server).protocol !== 'wss:') throw new Error('SIP 服务必须使用 WSS');
+    } catch (error) {
+      this.setRegistration('disconnected');
+      throw error;
+    }
     const uri = UserAgent.makeURI(config.aor);
-    if (!uri || uri.scheme !== 'sip') throw new Error('Invalid SIP address');
+    if (!uri || uri.scheme !== 'sip') {
+      this.setRegistration('disconnected');
+      throw new Error('Invalid SIP address');
+    }
     this.domain = uri.host;
     this.configuration = config;
     const mediaFactory = Web.defaultSessionDescriptionHandlerFactory();
@@ -74,6 +94,7 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
         onInvite: (invitation) => this.receive(invitation),
         onDisconnect: () => {
           this.registered = false;
+          this.setRegistration('disconnected');
           for (const id of this.sessions.keys())
             this.fail(id, new Error('SIP 连接已断开，请重新连接'));
         },
@@ -107,6 +128,7 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
             requestDelegate: {
               onAccept: () => {
                 this.registered = true;
+                this.setRegistration('registered');
                 finish();
               },
               onReject: (response) =>
@@ -126,6 +148,7 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
 
   async disconnect(): Promise<void> {
     this.registered = false;
+    this.setRegistration('disconnected');
     const agent = this.agent;
     this.agent = undefined;
     this.registerer = undefined;
@@ -134,6 +157,8 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
     } finally {
       this.sessions.clear();
       this.localEnding.clear();
+      this.transferring.clear();
+      this.degraded.clear();
       this.ringing.clear();
       for (const element of this.audio.values()) {
         element.pause();
@@ -160,7 +185,7 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
       const number = (command.payload as DialRequest).phoneNumber;
       const uri = this.destination(number);
       const session = new Inviter(this.agent, uri, {
-        sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } },
+        sessionDescriptionHandlerOptions: { constraints: this.mediaConstraints() },
       });
       this.track(command.callId, session);
       try {
@@ -193,7 +218,7 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
         if (!(session instanceof Invitation)) throw new Error('非呼入会话');
         await this.refreshConfiguration(signal);
         await session.accept({
-          sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } },
+          sessionDescriptionHandlerOptions: { constraints: this.mediaConstraints() },
         });
         break;
       case 'reject':
@@ -218,9 +243,21 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
           throw new Error('当前会话不支持 RTP DTMF');
         break;
       }
-      case 'transfer':
-        // REFER acceptance alone does not mean the target answered. Expose no false success.
-        throw new Error('真实模式暂未开放转接');
+      case 'transfer': {
+        const target = (command.payload as { target?: string } | undefined)?.target;
+        if (!target) throw new Error('转接目标无效');
+        const uri = this.destination(target);
+        this.transferring.add(command.callId);
+        try {
+          await this.confirmRefer(session, uri);
+          this.localEnding.add(command.callId);
+          await this.end(session);
+        } catch (error) {
+          this.transferring.delete(command.callId);
+          throw error;
+        }
+        break;
+      }
     }
   }
 
@@ -243,6 +280,35 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
         this.audio.delete(callId);
       }
     }
+  }
+  async setInputDevice(deviceId: string): Promise<void> {
+    this.inputDevice = deviceId;
+  }
+  async enumerateDevices(): Promise<readonly AudioDevice[]> {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+      .filter((device) => device.kind === 'audioinput' || device.kind === 'audiooutput')
+      .map((device) => ({ deviceId: device.deviceId, kind: device.kind, label: device.label }));
+  }
+  async getQuality(callId: string): Promise<CallQuality | undefined> {
+    const handler = this.sessions.get(callId)?.sessionDescriptionHandler;
+    if (!(handler instanceof Web.SessionDescriptionHandler)) return undefined;
+    const peer = handler.peerConnection;
+    if (!peer || typeof peer.getStats !== 'function')
+      return { timestamp: Date.now(), level: 'unknown' };
+    try {
+      return qualityFromAudioStats(await peer.getStats());
+    } catch {
+      return { timestamp: Date.now(), level: 'unknown' };
+    }
+  }
+  watchRegistration(listener: (state: SipRegistrationState) => void): () => void {
+    this.registrationListeners.add(listener);
+    listener(this.registration);
+    return () => {
+      this.registrationListeners.delete(listener);
+    };
   }
   async setMuted(callId: string, muted: boolean): Promise<void> {
     const handler = this.sessions.get(callId)?.sessionDescriptionHandler;
@@ -303,9 +369,12 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
         // SIP.js transitions to Terminated before calling the rejection delegate.
         // Let a final 4xx/5xx response report its reason before generic termination.
         queueMicrotask(() => {
+          const transferring = this.transferring.has(id);
           this.sessions.delete(id);
           this.ringing.delete(id);
-          if (!this.localEnding.delete(id)) this.event(id, { type: 'REMOTE_HANGUP' });
+          this.degraded.delete(id);
+          if (!this.localEnding.delete(id) && !transferring)
+            this.event(id, { type: 'REMOTE_HANGUP' });
           void this.release(id).catch(() => {});
         });
       }
@@ -322,8 +391,17 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
     // Autoplay may require a subsequent user gesture; UI exposes resumeAudio.
     await element.play().catch(() => {});
     handler.peerConnection?.addEventListener('connectionstatechange', () => {
-      if (handler.peerConnection?.connectionState === 'failed')
+      if (this.localEnding.has(id) || this.transferring.has(id)) return;
+      const connection = handler.peerConnection?.connectionState;
+      if (connection === 'disconnected') {
+        if (this.degraded.has(id)) return;
+        this.degraded.add(id);
+        this.event(id, { type: 'NETWORK_LOST' });
+      } else if (connection === 'connected') {
+        if (this.degraded.delete(id)) this.event(id, { type: 'NETWORK_RESTORED' });
+      } else if (connection === 'failed') {
         this.fail(id, new Error('音频连接失败，请检查 TURN 和网络'));
+      }
     });
   }
   private async end(session: Session): Promise<void> {
@@ -335,6 +413,37 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
       return;
     else if (session instanceof Inviter) await session.cancel();
     else if (session instanceof Invitation) await session.reject();
+  }
+  private mediaConstraints(): MediaStreamConstraints {
+    return {
+      audio: this.inputDevice ? { deviceId: { exact: this.inputDevice } } : true,
+      video: false,
+    };
+  }
+  private confirmRefer(
+    session: Session,
+    target: ReturnType<SipTransport['destination']>,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('转接请求超时')), 15_000);
+      void session
+        .refer(target, {
+          requestDelegate: {
+            onAccept: () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            onReject: (response) => {
+              clearTimeout(timer);
+              reject(new Error(`服务端拒绝转接 (${response.message.statusCode})`));
+            },
+          },
+        })
+        .catch((error: unknown) => {
+          clearTimeout(timer);
+          reject(asError(error));
+        });
+    });
   }
   private confirmReinvite(session: Session, hold: boolean): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -387,6 +496,11 @@ export class SipTransport implements SignalingTransport, MediaAdapter {
   }
   private emit(event: TransportEvent): void {
     this.listeners.forEach((listener) => listener(event));
+  }
+  private setRegistration(state: SipRegistrationState): void {
+    if (this.registration === state) return;
+    this.registration = state;
+    for (const listener of this.registrationListeners) listener(state);
   }
 }
 

@@ -1,4 +1,4 @@
-import type { CallHandle, CallSnapshot } from '@cloudcall/core';
+import type { CallHandle, CallQuality, CallSnapshot } from '@cloudcall/core';
 
 export function CallControls({
   call,
@@ -43,6 +43,16 @@ export function CallControls({
           >
             {snapshot.state === 'holding' ? '恢复' : '保持'}
           </button>
+          <button
+            type="button"
+            className="ctrl"
+            aria-pressed={snapshot.recording === 'recording'}
+            onClick={() =>
+              run(snapshot.recording === 'recording' ? call.stopRecording() : call.startRecording())
+            }
+          >
+            {snapshot.recording === 'recording' ? '停止录音' : '录音'}
+          </button>
         </>
       )}
       {!['ended', 'failed', 'incoming'].includes(snapshot.state) && (
@@ -55,4 +65,22 @@ export function CallControls({
 }
 export function StatusBadge({ state }: { state: CallSnapshot['state'] }) {
   return <span className={`status status-${state}`}>{state}</span>;
+}
+
+const QUALITY_LABEL = { good: '良好', fair: '一般', poor: '较差', unknown: '未知' } as const;
+
+export function QualityMeter({ quality }: { quality: CallQuality | undefined }) {
+  const level = quality?.level ?? 'unknown';
+  const detail = [
+    quality?.roundTripTimeMs !== undefined ? `RTT ${Math.round(quality.roundTripTimeMs)}ms` : '',
+    quality?.jitterMs !== undefined ? `抖动 ${Math.round(quality.jitterMs)}ms` : '',
+    quality?.packetsLost !== undefined ? `丢包 ${quality.packetsLost}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <span className={`quality quality-${level}`} title={detail || undefined} aria-live="polite">
+      质量 {QUALITY_LABEL[level]}
+    </span>
+  );
 }

@@ -137,4 +137,101 @@ describe('CloudCallSDK lifecycle', () => {
     expect(two.getCalls()).toHaveLength(0);
     await Promise.all([one.destroy(), two.destroy()]);
   });
+  it('tracks agent presence, screen pop, blind transfer and recording', async () => {
+    vi.useFakeTimers();
+    const f = fixtures();
+    const stopped: string[] = [];
+    const pops: string[] = [];
+    const sdk = createCloudCall({
+      transport: f.transport,
+      media: f.media,
+      host: {
+        getAccessToken: async () => '',
+        screenPop: (pop) => {
+          pops.push(pop.phoneNumber);
+        },
+      },
+      recording: {
+        start: async () => ({ id: 'rec-1' }),
+        stop: async (_call, id) => {
+          stopped.push(id);
+        },
+      },
+      config: { wrapUpMs: 1_000 },
+    });
+    try {
+      const presence: string[] = [];
+      sdk.on('agent:presence', (event) => presence.push(event.presence));
+      sdk.on('crm:screen-pop', (pop) => pops.push(`event:${pop.direction}`));
+      await sdk.init();
+      expect(sdk.getAgentPresence()).toBe('available');
+      const call = await sdk.dial({ phoneNumber: '10086', businessContext: { account: 'AC-1' } });
+      expect(sdk.getAgentPresence()).toBe('busy');
+      expect(pops).toEqual(['event:outbound', '10086']);
+      f.listeners.forEach((listener) =>
+        listener({
+          type: 'call-event',
+          callId: call.id,
+          messageId: 'accepted',
+          event: { type: 'REMOTE_ACCEPTED' },
+        }),
+      );
+      await Promise.resolve();
+      await call.startRecording();
+      expect(call.getSnapshot().recording).toBe('recording');
+      sdk.setAgentPresence('away');
+      expect(sdk.getAgentPresence()).toBe('busy');
+      expect(sdk.getDesiredPresence()).toBe('away');
+      await call.transfer('10010');
+      expect(call.getSnapshot().endReason).toBe('transferred');
+      expect(stopped).toEqual(['rec-1']);
+      expect(sdk.getAgentPresence()).toBe('wrap-up');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sdk.getAgentPresence()).toBe('away');
+      expect(presence).toContain('wrap-up');
+    } finally {
+      await sdk.destroy();
+      vi.useRealTimers();
+    }
+  });
+  it('publishes media quality samples for active calls', async () => {
+    vi.useFakeTimers();
+    const f = fixtures();
+    f.media.getQuality = vi.fn(async () => ({
+      timestamp: 1,
+      level: 'fair' as const,
+      jitterMs: 50,
+      roundTripTimeMs: 220,
+      packetsLost: 2,
+      packetsReceived: 80,
+    }));
+    const sdk = createCloudCall({
+      transport: f.transport,
+      media: f.media,
+      host: { getAccessToken: async () => '' },
+      config: { qualityIntervalMs: 500 },
+    });
+    const samples: string[] = [];
+    sdk.on('call:quality', (sample) => samples.push(sample.quality.level));
+    try {
+      await sdk.init();
+      const call = await sdk.dial({ phoneNumber: '1001' });
+      f.listeners.forEach((listener) =>
+        listener({
+          type: 'call-event',
+          callId: call.id,
+          messageId: 'accepted',
+          event: { type: 'REMOTE_ACCEPTED' },
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(call.getSnapshot().state).toBe('active');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(samples).toContain('fair');
+    } finally {
+      await sdk.destroy();
+      vi.useRealTimers();
+    }
+  });
 });

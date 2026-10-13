@@ -53,3 +53,7 @@ Core 只依赖注入的接口，不依赖 DOM、React、Vue 或 SIP.js。`CloudC
 ### ADR-005：React UI 可选
 
 核心能力能被原生 JS、Vue 和 iframe 使用，避免 React 版本冲突与不必要包体积；代价是绑定层需要维护一致的订阅约定。
+
+### ADR-007：座席产品能力留在 SDK 端口
+
+见 [docs/adr/007-softphone-product-ports.md](adr/007-softphone-product-ports.md)。咨询转接、会议、队列和回呼继续留给真实 PBX/ACD。

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { createApi } from './app.mjs';
 import { hashPassword, verifyPassword } from './auth.mjs';
+import { createFileStore } from './session-store.mjs';
 
 test('password hashes are salted and reject incorrect/malformed passwords', () => {
   const hashed = hashPassword('a-long-test-password');
@@ -36,6 +37,7 @@ test('API isolates credentials, checks origins, signs TURN credentials and revok
     sipServer: 'wss://pbx.example.com/ws',
     turnSecret: 'test-turn-secret',
     turnUrls: ['turn:turn.example.com:3478'],
+    logger: { info() {}, warn() {} },
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -86,9 +88,104 @@ test('API isolates credentials, checks origins, signs TURN credentials and revok
       const failed = await post('/api/login', { username: 'victim', password: 'wrong' });
       assert.equal(failed.status, index < 5 ? 401 : 429);
     }
+    const health = await fetch(`${url}/api/health`);
+    assert.equal(health.status, 200);
+    const body = await health.json();
+    assert.equal(body.status, 'ok');
+    assert.equal(body.ready, true);
+    assert.equal(body.checks.users, true);
+    assert.equal(body.checks.sipServerConfigured, true);
+    assert.equal(body.checks.turnConfigured, true);
+    assert.equal(body.checks.publicOriginConfigured, true);
+    assert.equal(body.checks.sessionStore, 'memory');
+    assert.equal(JSON.stringify(body).includes('test-turn-secret'), false);
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('file-backed sessions are shared and logs omit secrets', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cloudcall-shared-'));
+  const usersFile = join(directory, 'users.json');
+  const sessionFile = join(directory, 'sessions.json');
+  const attemptFile = join(directory, 'attempts.json');
+  writeFileSync(
+    usersFile,
+    JSON.stringify([
+      {
+        username: 'alice',
+        passwordHash: hashPassword('test-password-long'),
+        aor: 'sip:1001@pbx.example.com',
+        authorizationUsername: '1001',
+        authorizationPassword: 'private-sip-password',
+      },
+    ]),
+  );
+  const lines = [];
+  const logger = {
+    info(event, fields) {
+      lines.push({ event, ...fields });
+    },
+    warn(event, fields) {
+      lines.push({ event, ...fields });
+    },
+  };
+  const base = {
+    usersFile,
+    publicOrigin: 'https://call.example.com',
+    sipServer: 'wss://pbx.example.com/ws',
+    turnSecret: 'test-turn-secret',
+    turnUrls: ['turn:turn.example.com:3478'],
+    sessionStore: createFileStore(sessionFile),
+    attemptStore: createFileStore(attemptFile),
+    logger,
+  };
+  const first = createApi(base);
+  const second = createApi({
+    ...base,
+    sessionStore: createFileStore(sessionFile),
+    attemptStore: createFileStore(attemptFile),
+  });
+  await new Promise((resolve) => first.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) => second.listen(0, '127.0.0.1', resolve));
+  const firstPort = first.address().port;
+  const secondPort = second.address().port;
+  try {
+    const login = await fetch(`http://127.0.0.1:${firstPort}/api/login`, {
+      method: 'POST',
+      headers: { Origin: 'https://call.example.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 'test-password-long' }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const config = await fetch(`http://127.0.0.1:${secondPort}/api/telephony/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(config.status, 200);
+    const logout = await fetch(`http://127.0.0.1:${secondPort}/api/logout`, {
+      method: 'POST',
+      headers: { Origin: 'https://call.example.com', Cookie: cookie },
+    });
+    assert.equal(logout.status, 200);
+    const again = await fetch(`http://127.0.0.1:${firstPort}/api/telephony/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(again.status, 401);
+    const health = await (await fetch(`http://127.0.0.1:${firstPort}/api/health`)).json();
+    assert.equal(health.checks.sessionStore, 'file');
+    assert.equal(health.checks.sessionStoreReady, true);
+    const serialized = JSON.stringify(lines);
+    assert.match(serialized, /login_succeeded/);
+    assert.equal(serialized.includes('test-password-long'), false);
+    assert.equal(serialized.includes('private-sip-password'), false);
+    assert.equal(serialized.includes('test-turn-secret'), false);
+  } finally {
+    first.closeAllConnections();
+    second.closeAllConnections();
+    await new Promise((resolve) => first.close(resolve));
+    await new Promise((resolve) => second.close(resolve));
     rmSync(directory, { recursive: true, force: true });
   }
 });

@@ -13,8 +13,24 @@ const legal: Record<CallState, ReadonlySet<CallEvent['type']>> = {
   ]),
   incoming: new Set(['ACCEPT', 'REJECT', 'REMOTE_HANGUP', 'TIMEOUT', 'FAIL', 'DESTROY']),
   ringing: new Set(['REMOTE_ACCEPTED', 'HANGUP', 'REMOTE_HANGUP', 'TIMEOUT', 'FAIL', 'DESTROY']),
-  active: new Set(['HANGUP', 'REMOTE_HANGUP', 'HOLD', 'NETWORK_LOST', 'FAIL', 'DESTROY']),
-  holding: new Set(['RESUME', 'HANGUP', 'REMOTE_HANGUP', 'NETWORK_LOST', 'FAIL', 'DESTROY']),
+  active: new Set([
+    'HANGUP',
+    'REMOTE_HANGUP',
+    'HOLD',
+    'NETWORK_LOST',
+    'TRANSFERRED',
+    'FAIL',
+    'DESTROY',
+  ]),
+  holding: new Set([
+    'RESUME',
+    'HANGUP',
+    'REMOTE_HANGUP',
+    'NETWORK_LOST',
+    'TRANSFERRED',
+    'FAIL',
+    'DESTROY',
+  ]),
   reconnecting: new Set([
     'NETWORK_RESTORED',
     'HANGUP',
@@ -79,6 +95,9 @@ export function transition(
   } else if (event.type === 'TIMEOUT') {
     state = 'ended';
     endReason = 'timeout';
+  } else if (event.type === 'TRANSFERRED') {
+    state = 'ended';
+    endReason = 'transferred';
   } else if (event.type === 'DESTROY') {
     state = 'ended';
     endReason = 'sdk-destroyed';

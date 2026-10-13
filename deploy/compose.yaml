@@ -24,8 +24,12 @@ services:
       SIP_SERVER: ${SIP_SERVER:?Set SIP_SERVER}
       TURN_SECRET: ${TURN_SECRET:?Set TURN_SECRET}
       TURN_URLS: ${TURN_URLS:?Set TURN_URLS}
+      # SESSION_STORE_PATH: /var/lib/cloudcall/sessions.json
+      # ATTEMPT_STORE_PATH: /var/lib/cloudcall/attempts.json
     volumes:
       - ./secrets/users.json:/run/secrets/users.json:ro
+      # The image root is read-only. Uncomment with the env vars above for a shared file store.
+      # - session_data:/var/lib/cloudcall
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

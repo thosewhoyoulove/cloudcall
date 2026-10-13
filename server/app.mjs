@@ -2,6 +2,8 @@ import { createServer } from 'node:http';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { verifyPassword, hashPassword } from './auth.mjs';
+import { createMemoryStore } from './session-store.mjs';
+import { createLogger } from './logger.mjs';
 
 export function createApi(config) {
   const users = JSON.parse(readFileSync(config.usersFile, 'utf8'));
@@ -25,12 +27,43 @@ export function createApi(config) {
       throw new Error('Invalid or duplicate user configuration');
     names.add(user.username);
   }
-  const sessions = new Map();
-  const attempts = new Map();
+  const sessions = config.sessionStore ?? createMemoryStore();
+  const attempts = config.attemptStore ?? createMemoryStore();
+  const logger = config.logger ?? createLogger();
+  const startedAt = Date.now();
   const dummyHash = hashPassword(randomBytes(32).toString('hex'));
   const digest = (value) => createHash('sha256').update(value).digest('hex');
   const cookieName = '__Host-cloudcall';
   const lifetime = 8 * 60 * 60 * 1000;
+  function usersReady() {
+    try {
+      const parsed = JSON.parse(readFileSync(config.usersFile, 'utf8'));
+      return Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      return false;
+    }
+  }
+  function health() {
+    const sessionStoreReady = sessions.ready() !== false;
+    const attemptStoreReady = attempts.ready() !== false;
+    const usersOk = usersReady();
+    const ready = usersOk && sessionStoreReady && attemptStoreReady;
+    return {
+      status: ready ? 'ok' : 'degraded',
+      ready,
+      uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+      checks: {
+        users: usersOk,
+        sipServerConfigured: true,
+        turnConfigured: true,
+        publicOriginConfigured: true,
+        sessionStore: sessions.kind,
+        sessionStoreReady,
+        attemptStore: attempts.kind,
+        attemptStoreReady,
+      },
+    };
+  }
   function respond(response, status, data, headers = {}) {
     response.writeHead(status, {
       'Content-Type': 'application/json',
@@ -46,7 +79,16 @@ export function createApi(config) {
       .map((part) => part.trim())
       .find((part) => part.startsWith(`${cookieName}=`))
       ?.slice(cookieName.length + 1);
-    return token ? sessions.get(digest(token)) : undefined;
+    if (!token) return undefined;
+    const key = digest(token);
+    const record = sessions.get(key);
+    if (!record || record.expires <= Date.now()) {
+      if (record) sessions.delete(key);
+      return undefined;
+    }
+    const user = users.find((candidate) => candidate.username === record.username);
+    if (!user) return undefined;
+    return { key, user };
   }
   async function readJson(request) {
     if (!request.headers['content-type']?.startsWith('application/json'))
@@ -63,11 +105,11 @@ export function createApi(config) {
     async (request, response) => {
       try {
         const now = Date.now();
-        for (const [key, value] of sessions) if (value.expires <= now) sessions.delete(key);
-        for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key);
+        sessions.sweep((value) => value.expires <= now);
+        attempts.sweep((value) => value.until <= now);
         const path = new URL(request.url ?? '/', config.publicOrigin).pathname;
         if (request.method === 'GET' && path === '/api/health')
-          return respond(response, 200, { status: 'ok' });
+          return respond(response, 200, health());
         if (request.method === 'POST' && request.headers.origin !== publicOrigin.origin)
           return respond(response, 403, { error: 'Invalid origin' });
         if (request.method === 'POST' && path === '/api/login') {
@@ -82,18 +124,28 @@ export function createApi(config) {
             return respond(response, 400, { error: 'Invalid credentials' });
           const keys = [`ip:${request.socket.remoteAddress}`, `user:${input.username}`];
           for (const key of keys) {
-            const limit = attempts.get(key) ?? { count: 0, until: now + 60_000 };
-            limit.count++;
-            attempts.set(key, limit);
-            if (limit.count > (key.startsWith('ip:') ? 60 : 5))
+            const limit = attempts.update(key, (current) => {
+              const fresh = !current || current.until <= now;
+              const next = fresh ? { count: 0, until: now + 60_000 } : current;
+              next.count += 1;
+              return next;
+            });
+            if (limit.count > (key.startsWith('ip:') ? 60 : 5)) {
+              logger.warn('rate_limited', { scope: key.startsWith('ip:') ? 'ip' : 'user' });
               return respond(response, 429, { error: 'Try later' }, { 'Retry-After': '60' });
+            }
           }
           const user = users.find((candidate) => candidate.username === input.username);
           const valid = verifyPassword(input.password, user?.passwordHash ?? dummyHash);
-          if (!user || !valid) return respond(response, 401, { error: 'Invalid credentials' });
-          if (sessions.size >= 10_000) return respond(response, 503, { error: 'Capacity reached' });
+          if (!user || !valid) {
+            logger.warn('login_failed', { username: input.username });
+            return respond(response, 401, { error: 'Invalid credentials' });
+          }
+          if (sessions.size() >= 10_000)
+            return respond(response, 503, { error: 'Capacity reached' });
           const token = randomBytes(32).toString('hex');
-          sessions.set(digest(token), { user, expires: now + lifetime });
+          sessions.set(digest(token), { username: user.username, expires: now + lifetime });
+          logger.info('login_succeeded', { username: user.username });
           return respond(
             response,
             200,
@@ -108,7 +160,8 @@ export function createApi(config) {
         if (request.method === 'GET' && path === '/api/session')
           return respond(response, 200, { username: current.user.username });
         if (request.method === 'POST' && path === '/api/logout') {
-          for (const [key, value] of sessions) if (value === current) sessions.delete(key);
+          sessions.delete(current.key);
+          logger.info('logout', { username: current.user.username });
           return respond(
             response,
             200,
@@ -124,6 +177,7 @@ export function createApi(config) {
           const credential = createHmac('sha1', config.turnSecret)
             .update(turnUsername)
             .digest('base64');
+          logger.info('telephony_config', { username: user.username });
           return respond(response, 200, {
             server: config.sipServer,
             aor: user.aor,
@@ -133,7 +187,10 @@ export function createApi(config) {
           });
         }
         respond(response, 404, { error: 'Not found' });
-      } catch {
+      } catch (error) {
+        logger.warn('request_failed', {
+          message: error instanceof Error ? error.message : 'invalid',
+        });
         respond(response, 400, { error: 'Invalid request' });
       }
     },

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createCloudCall,
+  type AgentPresence,
+  type AudioDevice,
   type CallHandle,
+  type CallQuality,
   type CallSnapshot,
+  type ScreenPop,
   type SdkState,
 } from '@cloudcall/core';
-import type { FaultProfile } from '@cloudcall/signaling';
+import type { FaultProfile, SipRegistrationState } from '@cloudcall/signaling';
 import { createRuntime, realCalls } from './runtime';
 import { messageOf } from './format';
 
@@ -37,6 +41,17 @@ export function useWorkbench() {
   const [faults, setFaults] = useState<FaultProfile>(initialFaults);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [presence, setPresence] = useState<AgentPresence>('offline');
+  const [desiredPresence, setDesiredPresenceState] = useState<'available' | 'away'>('available');
+  const [screenPop, setScreenPop] = useState<ScreenPop | null>(null);
+  const [quality, setQuality] = useState<CallQuality | undefined>();
+  const [registration, setRegistration] = useState<SipRegistrationState>(
+    realCalls ? 'connecting' : 'registered',
+  );
+  const [devices, setDevices] = useState<readonly AudioDevice[]>([]);
+  const [inputDevice, setInputDeviceId] = useState('');
+  const [outputDevice, setOutputDeviceId] = useState('');
+  const [linkQuality, setLinkQualityState] = useState<'good' | 'fair' | 'poor'>('good');
 
   const runtime = useMemo(createRuntime, []);
   const { transport, media } = runtime;
@@ -51,9 +66,17 @@ export function useWorkbench() {
           },
           track() {},
         },
+        recording: {
+          async start(call) {
+            return { id: `rec-${call.id}` };
+          },
+          async stop() {},
+        },
         config: {
           callTimeoutMs: realCalls ? 45_000 : 15_000,
           maxConcurrentCalls: realCalls ? 1 : 3,
+          wrapUpMs: 4_000,
+          qualityIntervalMs: 2_000,
         },
       }),
     [media, transport],
@@ -101,25 +124,57 @@ export function useWorkbench() {
       }),
       sdk.on('call:updated', (call) => {
         sync();
-        log('state', `${call.phoneNumber} ${call.state}`);
+        log(
+          'state',
+          `${call.phoneNumber} ${call.state}${call.recording ? ` ${call.recording}` : ''}`,
+        );
+      }),
+      sdk.on('agent:presence', (event) => {
+        setPresence(event.presence);
+        log('lifecycle', `presence ${event.presence} (${event.reason})`);
+      }),
+      sdk.on('crm:screen-pop', (pop) => {
+        setScreenPop(pop);
+        log('call', `screen-pop ${pop.direction} ${pop.phoneNumber}`);
+      }),
+      sdk.on('call:quality', (sample) => {
+        setQuality((current) =>
+          current?.level === sample.quality.level &&
+          current.packetsLost === sample.quality.packetsLost
+            ? current
+            : sample.quality,
+        );
       }),
       transport.subscribe((event) => {
         if (event.type === 'incoming') log('signaling', `incoming ${event.call.phoneNumber}`);
         else log('signaling', `${event.event.type} ${event.callId.slice(0, 8)}`);
       }),
     ];
+    const stopRegistration = runtime.sip?.watchRegistration((value) => {
+      setRegistration(value);
+      log('signaling', `registration ${value}`);
+    });
+    void media
+      .enumerateDevices?.()
+      .then(setDevices)
+      .catch(() => {});
     void sdk.init().catch(report);
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => {
       stops.forEach((stop) => stop());
+      stopRegistration?.();
       window.clearInterval(timer);
       void sdk.destroy();
     };
-  }, [log, report, sdk, transport]);
+  }, [log, media, report, runtime.sip, sdk, transport]);
 
   const active = [...calls]
     .reverse()
     .find((call) => call.state !== 'ended' && call.state !== 'failed');
+  const activeId = active?.id;
+  useEffect(() => {
+    setQuality(undefined);
+  }, [activeId]);
   const handle = active ? handles.get(active.id) : undefined;
   const latest = calls.length > 0 ? calls[calls.length - 1] : undefined;
 
@@ -238,11 +293,81 @@ export function useWorkbench() {
 
   const clearLogs = useCallback(() => setLogs([]), []);
   const dismissError = useCallback(() => setError(null), []);
+  const dismissScreenPop = useCallback(() => setScreenPop(null), []);
+  const setDesiredPresence = useCallback(
+    (next: 'available' | 'away') => {
+      setDesiredPresenceState(next);
+      try {
+        sdk.setAgentPresence(next);
+      } catch (caught) {
+        report(caught);
+      }
+    },
+    [report, sdk],
+  );
+  const acceptIncoming = useCallback(() => {
+    const live = activeRef.current;
+    if (live?.snapshot.state !== 'incoming') return Promise.resolve();
+    return live.handle.accept().catch(report);
+  }, [report]);
+  const rejectIncoming = useCallback(() => {
+    const live = activeRef.current;
+    if (live?.snapshot.state !== 'incoming') return Promise.resolve();
+    return live.handle.reject().catch(report);
+  }, [report]);
+  const hangupActive = useCallback(() => {
+    const live = activeRef.current;
+    if (!live || live.snapshot.state === 'incoming') return Promise.resolve();
+    if (live.snapshot.state === 'ended' || live.snapshot.state === 'failed')
+      return Promise.resolve();
+    return live.handle.hangup().catch(report);
+  }, [report]);
+  const toggleRecording = useCallback(() => {
+    const live = activeRef.current;
+    if (!live || (live.snapshot.state !== 'active' && live.snapshot.state !== 'holding'))
+      return Promise.resolve();
+    const action =
+      live.snapshot.recording === 'recording'
+        ? live.handle.stopRecording()
+        : live.handle.startRecording();
+    return action.catch(report);
+  }, [report]);
+  const chooseInput = useCallback(
+    (deviceId: string) => {
+      setInputDeviceId(deviceId);
+      return Promise.resolve(media.setInputDevice?.(deviceId)).catch(report);
+    },
+    [media, report],
+  );
+  const chooseOutput = useCallback(
+    (deviceId: string) => {
+      setOutputDeviceId(deviceId);
+      return Promise.resolve(media.setOutputDevice?.(deviceId)).catch(report);
+    },
+    [media, report],
+  );
+  const setLinkQuality = useCallback(
+    (level: 'good' | 'fair' | 'poor') => {
+      runtime.mockMedia?.setQuality(level);
+      setLinkQualityState(level);
+      log('fault', `quality=${level}`);
+    },
+    [log, runtime],
+  );
 
   return {
     reportError: report,
     realCalls,
-    registered: runtime.sip?.isRegistered() ?? state === 'ready',
+    registered: realCalls ? registration === 'registered' : state === 'ready' && !faults.offline,
+    registration,
+    presence,
+    desiredPresence,
+    screenPop,
+    quality,
+    devices,
+    inputDevice,
+    outputDevice,
+    linkQuality,
     resumeAudio: () => runtime.sip?.resumeAudio().catch(report),
     number,
     setNumber,
@@ -273,6 +398,15 @@ export function useWorkbench() {
     destroySdk,
     clearLogs,
     dismissError,
+    dismissScreenPop,
+    setDesiredPresence,
+    acceptIncoming,
+    rejectIncoming,
+    hangupActive,
+    toggleRecording,
+    chooseInput,
+    chooseOutput,
+    setLinkQuality,
   };
 }
 

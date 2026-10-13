@@ -17,7 +17,30 @@ const fake = vi.hoisted(() => {
     track = { enabled: true };
     localMediaStream = { getAudioTracks: () => [this.track] };
     remoteMediaStream = {};
-    peerConnection = { addEventListener: vi.fn(), connectionState: 'connected' };
+    peerConnection = {
+      connectionState: 'connected' as string,
+      listeners: {} as Record<string, () => void>,
+      addEventListener: (name: string, listener: () => void) => {
+        this.peerConnection.listeners[name] = listener;
+      },
+      getStats: async () => ({
+        forEach(callback: (stat: Record<string, unknown>) => void) {
+          callback({
+            type: 'inbound-rtp',
+            kind: 'audio',
+            jitter: 0.02,
+            packetsLost: 1,
+            packetsReceived: 100,
+          });
+          callback({
+            type: 'candidate-pair',
+            state: 'succeeded',
+            nominated: true,
+            currentRoundTripTime: 0.05,
+          });
+        },
+      }),
+    };
     sendDtmf = vi.fn(() => true);
   }
   class Session {
@@ -31,6 +54,9 @@ const fake = vi.hoisted(() => {
     }
     bye = vi.fn(async () => {
       this.setState('Terminated');
+    });
+    refer = vi.fn(async () => {
+      throw new Error('REFER was not expected');
     });
     cancel = vi.fn(async () => {
       this.setState('Terminated');
@@ -53,7 +79,12 @@ const fake = vi.hoisted(() => {
       this.inviteOptions = options;
     });
   }
-  const state: { agent?: Agent; outgoing?: Inviter; rejectedRegistration: boolean } = {
+  const state: {
+    agent?: Agent;
+    outgoing?: Inviter;
+    rejectedRegistration: boolean;
+    inviterOptions?: unknown;
+  } = {
     rejectedRegistration: false,
   };
   class Agent {
@@ -90,9 +121,10 @@ const fake = vi.hoisted(() => {
     );
   }
   class Inviter extends Session {
-    constructor() {
+    constructor(...args: unknown[]) {
       super();
       state.outgoing = this;
+      state.inviterOptions = args[2];
     }
   }
   class Invitation extends Session {}
@@ -127,6 +159,7 @@ describe('SIP adapter contract', () => {
   beforeEach(() => {
     fake.state.rejectedRegistration = false;
     delete fake.state.outgoing;
+    delete fake.state.inviterOptions;
     vi.stubGlobal('window', { isSecureContext: true });
     vi.stubGlobal('Audio', fake.Audio);
   });
@@ -158,7 +191,9 @@ describe('SIP adapter contract', () => {
       await expect(sdk.dial({ phoneNumber: '1002' })).rejects.toThrow('登录已过期');
       expect(load).toHaveBeenCalledTimes(2);
       expect(fake.state.outgoing).toBeUndefined();
-    } finally { await sdk.destroy(); }
+    } finally {
+      await sdk.destroy();
+    }
   });
   it('rejects denied registrations and closes the agent', async () => {
     fake.state.rejectedRegistration = true;
@@ -238,6 +273,87 @@ describe('SIP adapter contract', () => {
       expect(sip.isRegistered()).toBe(false);
       await expect(sdk.dial({ phoneNumber: '1002' })).rejects.toThrow('SIP 尚未注册');
       expect(sdk.getCalls()[0]?.state).toBe('failed');
+    } finally {
+      await sdk.destroy();
+    }
+  });
+  it('ends the call only after a blind REFER is accepted', async () => {
+    const { sdk } = fixture();
+    try {
+      await sdk.init();
+      const call = await sdk.dial({ phoneNumber: '1002' });
+      const session = fake.state.outgoing!;
+      session.setState('Established');
+      await Promise.resolve();
+      session.refer.mockImplementation(async (_target, options) => {
+        options?.requestDelegate?.onAccept?.();
+      });
+      await call.transfer('1003');
+      expect(session.refer).toHaveBeenCalled();
+      expect(call.getSnapshot().endReason).toBe('transferred');
+      expect(session.bye).toHaveBeenCalled();
+    } finally {
+      await sdk.destroy();
+    }
+  });
+  it('keeps the call active when the PBX rejects REFER', async () => {
+    const { sdk } = fixture();
+    try {
+      await sdk.init();
+      const call = await sdk.dial({ phoneNumber: '1002' });
+      const session = fake.state.outgoing!;
+      session.setState('Established');
+      await Promise.resolve();
+      session.refer.mockImplementation(async (_target, options) => {
+        options?.requestDelegate?.onReject?.({ message: { statusCode: 603 } });
+      });
+      await expect(call.transfer('1003')).rejects.toThrow('603');
+      expect(call.getSnapshot().state).toBe('active');
+      expect(session.bye).not.toHaveBeenCalled();
+    } finally {
+      await sdk.destroy();
+    }
+  });
+  it('moves an established call through media reconnect and reads WebRTC stats', async () => {
+    const { sip, sdk } = fixture();
+    try {
+      await sdk.init();
+      const call = await sdk.dial({ phoneNumber: '1002' });
+      const session = fake.state.outgoing!;
+      session.setState('Established');
+      const peer = session.sessionDescriptionHandler.peerConnection;
+      await vi.waitFor(() => {
+        expect(peer.listeners.connectionstatechange).toBeTypeOf('function');
+      });
+      peer.connectionState = 'disconnected';
+      peer.listeners.connectionstatechange?.();
+      expect(call.getSnapshot().state).toBe('reconnecting');
+      peer.connectionState = 'connected';
+      peer.listeners.connectionstatechange?.();
+      expect(call.getSnapshot().state).toBe('active');
+      await expect(sip.getQuality(call.id)).resolves.toMatchObject({
+        level: 'good',
+        packetsLost: 1,
+        packetsReceived: 100,
+      });
+    } finally {
+      await sdk.destroy();
+    }
+  });
+  it('applies the selected microphone on the next invite', async () => {
+    const { sip, sdk } = fixture();
+    try {
+      await sdk.init();
+      await sip.setInputDevice('mic-7');
+      await sdk.dial({ phoneNumber: '1002' });
+      const options = fake.state.inviterOptions as {
+        sessionDescriptionHandlerOptions: {
+          constraints: { audio: { deviceId: { exact: string } } };
+        };
+      };
+      expect(options.sessionDescriptionHandlerOptions.constraints.audio.deviceId.exact).toBe(
+        'mic-7',
+      );
     } finally {
       await sdk.destroy();
     }

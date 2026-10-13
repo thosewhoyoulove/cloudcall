@@ -1,4 +1,10 @@
-import type { CallEndReason, CallState, SdkState } from '@cloudcall/core';
+import type {
+  AgentPresence,
+  CallEndReason,
+  CallState,
+  QualityLevel,
+  SdkState,
+} from '@cloudcall/core';
 
 export const callStateLabel: Record<CallState, string> = {
   connecting: '正在连接',
@@ -29,8 +35,34 @@ export const endReasonLabel: Record<CallEndReason, string> = {
   timeout: '超时',
   'network-error': '网络错误',
   'signaling-error': '信令错误',
+  transferred: '已转接',
   'sdk-destroyed': '实例销毁',
 };
+
+export const presenceLabel: Record<AgentPresence, string> = {
+  available: '可接听',
+  away: '离开',
+  busy: '通话中',
+  'wrap-up': '话后处理',
+  offline: '离线',
+};
+
+export const qualityLabel: Record<QualityLevel, string> = {
+  good: '良好',
+  fair: '一般',
+  poor: '较差',
+  unknown: '未知',
+};
+
+export function lookupCaller(phoneNumber: string): { name: string; account: string } | undefined {
+  const directory: Record<string, { name: string; account: string }> = {
+    '13800138000': { name: '示例客户 · 默认号码', account: 'AC-1000' },
+    '4008008888': { name: '示例客户 · 华北', account: 'AC-2048' },
+    '1001': { name: '分机 1001', account: 'EXT-1001' },
+    '1002': { name: '分机 1002', account: 'EXT-1002' },
+  };
+  return directory[phoneNumber.replace(/[^\d]/g, '')];
+}
 
 export const directionLabel = { inbound: '呼入', outbound: '呼出' } as const;
 
